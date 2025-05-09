@@ -48,7 +48,7 @@ from sae_bench.sae_bench_utils.sae_selection_utils import (
 # So, it's the shorter name: full name map
 LLM_NAME_MAP = {
     "gemma-2-2b": "google/gemma-2-2b",
-    "pythia-160m-deduped": "EleutherAI/pythia-160m-deduped",
+    "pythia-160m": "EleutherAI/pythia-160m",
 }
 
 

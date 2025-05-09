@@ -570,6 +570,7 @@ if __name__ == "__main__":
 
     LLM_NAME_MAP = {
         "gemma-2-2b": "google/gemma-2-2b",
+        "pythia-160m": "EleutherAI/pythia-160m",
     }
     config.model_name = LLM_NAME_MAP[config.model_name]
     llm_dtype = general_utils.str_to_dtype(config.llm_dtype)

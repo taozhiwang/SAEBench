@@ -28,6 +28,12 @@ MODEL_CONFIGS = {
         "layers": [12],
         "d_model": 2304,
     },
+    "pythia-160m": {
+        "batch_size": 512,
+        "dtype": "float32",
+        "layers": [8],
+        "d_model": 1024,
+    },
 }
 
 output_folders = {
@@ -93,7 +99,7 @@ def run_evals(
         "core": (
             lambda: core.multiple_evals(
                 selected_saes=selected_saes,
-                n_eval_reconstruction_batches=200,
+                n_eval_reconstruction_batches=3200,
                 n_eval_sparsity_variance_batches=2000,
                 eval_batch_size_prompts=16,
                 compute_featurewise_density_statistics=True,
@@ -174,7 +180,7 @@ def run_evals(
         "unlearning": (
             lambda: unlearning.run_eval(
                 unlearning.UnlearningEvalConfig(
-                    model_name="gemma-2-2b-it",
+                    model_name=model_name,
                     random_seed=RANDOM_SEED,
                     llm_dtype=llm_dtype,
                     llm_batch_size=llm_batch_size // 8,
@@ -192,19 +198,19 @@ def run_evals(
         if eval_type == "autointerp" and api_key is None:
             print("Skipping autointerp evaluation due to missing API key")
             continue
-        if eval_type == "unlearning":
-            if model_name != "gemma-2-2b":
-                print("Skipping unlearning evaluation for non-GEMMA model")
-                continue
-            print("Skipping, need to clean up unlearning interface")
-            continue  # TODO:
-            if not os.path.exists(
-                "./sae_bench/evals/unlearning/data/bio-forget-corpus.jsonl"
-            ):
-                print(
-                    "Skipping unlearning evaluation due to missing bio-forget-corpus.jsonl"
-                )
-                continue
+        # if eval_type == "unlearning":
+            # if model_name != "gemma-2-2b":
+            #     print("Skipping unlearning evaluation for non-GEMMA model")
+            #     continue
+            # print("Skipping, need to clean up unlearning interface")
+            # continue # TODO:
+            # if not os.path.exists(
+            #     "./sae_bench/evals/unlearning/data/bio-forget-corpus.jsonl"
+            # ):
+            #     print(
+            #         "Skipping unlearning evaluation due to missing bio-forget-corpus.jsonl"
+            #     )
+            #     continue
 
         print(f"\n\n\nRunning {eval_type} evaluation\n\n\n")
 

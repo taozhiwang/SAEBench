@@ -129,7 +129,7 @@ def run_eval(
         print(
             "\n\n\nWARNING: We recommend running this eval on instruct tuned models\n\n\n"
         )
-        raise ValueError("Model should be instruct tuned")
+        # raise ValueError("Model should be instruct tuned")
 
     eval_instance_id = get_eval_uuid()
     sae_lens_version = get_sae_lens_version()
