@@ -191,28 +191,41 @@ def plot_results(
     # )
 
     title_2var = f"{title_prefix}L0 vs {custom_metric_name}"
-    fig = plot_2var_graph(
+    # FIXME: 
+    # fig = plot_2var_graph(
+    #     eval_results,
+    #     custom_metric,
+    #     y_label=custom_metric_name,
+    #     title=title_2var,
+    #     output_filename=f"{image_base_name}_2var_sae_type.png",
+    #     trainer_markers=trainer_markers,
+    #     trainer_colors=trainer_colors,
+    #     baseline_value=baseline_value,
+    #     baseline_label=baseline_label,
+    # )
+    
+    # Add the new True/False plot
+    plot_2var_graph_true_false(
         eval_results,
         custom_metric,
         y_label=custom_metric_name,
-        title=title_2var,
-        output_filename=f"{image_base_name}_2var_sae_type.png",
-        trainer_markers=trainer_markers,
-        trainer_colors=trainer_colors,
+        title=f"{title_prefix}L0 vs {custom_metric_name} (True/False)",
+        output_filename=f"{image_base_name}_2var_true_false.png",
         baseline_value=baseline_value,
         baseline_label=baseline_label,
+        trainer_markers=trainer_markers,
     )
 
-    plot_2var_graph_dict_size(
-        eval_results,
-        custom_metric,
-        y_label=custom_metric_name,
-        title=title_2var,
-        output_filename=f"{image_base_name}_2var_dict_size.png",
-        baseline_value=baseline_value,
-        baseline_label=baseline_label,
-        trainer_markers=trainer_markers,
-    )
+    # plot_2var_graph_dict_size(
+    #     eval_results,
+    #     custom_metric,
+    #     y_label=custom_metric_name,
+    #     title=title_2var,
+    #     output_filename=f"{image_base_name}_2var_dict_size.png",
+    #     baseline_value=baseline_value,
+    #     baseline_label=baseline_label,
+    #     trainer_markers=trainer_markers,
+    # )
 
     if return_fig:
         return fig
@@ -302,8 +315,8 @@ def get_custom_metric_key_and_name(
         custom_metric = f"scr_metric_threshold_{k}"
         custom_metric_name = f"SCR Top {k} Metric"
     elif "sparse_probing" in eval_path:
-        custom_metric = f"sae_top_{k}_test_accuracy"
-        custom_metric_name = f"Sparse Probing Top {k} Test Accuracy"
+        custom_metric = f"sae_top_5_test_accuracy"
+        custom_metric_name = f"Sparse Probing Top 5 Test Accuracy"
     elif "absorption" in eval_path:
         custom_metric = "mean_absorption_fraction_score"
         custom_metric_name = "Mean Absorption Score"
@@ -313,6 +326,9 @@ def get_custom_metric_key_and_name(
     elif "unlearning" in eval_path:
         custom_metric = "unlearning_score"
         custom_metric_name = "Unlearning Score"
+    elif "ravel" in eval_path:
+        custom_metric = "disentanglement_score" 
+        custom_metric_name = "RAVEL Disentanglement Score"
     elif "core" in eval_path:
         custom_metric = "ce_loss_score"
         custom_metric_name = "Loss Recovered"
@@ -392,6 +408,8 @@ def get_eval_results(eval_filenames: list[str]) -> dict[str, dict]:
             eval_results[results_key] = single_sae_results["eval_result_metrics"][
                 "unlearning"
             ]
+        elif "ravel" in filepath:
+            eval_results[results_key] = single_sae_results["eval_result_metrics"]["ravel"]
         elif "core" in filepath:
             # core has nested evaluation metrics, so we flatten them out here
             core_results = single_sae_results["eval_result_metrics"]
@@ -748,6 +766,7 @@ def plot_2var_graph(
     ax.set_title(title)
 
     # x log
+    print(custom_metric)
     ax.set_xscale("log")
 
     if baseline_value is not None:
@@ -765,6 +784,14 @@ def plot_2var_graph(
         ax.set_xlim(*xlims)
     if ylims:
         ax.set_ylim(*ylims)
+
+    # Add this before plt.tight_layout()
+    for axis in ax.yaxis, ax.xaxis:
+        if isinstance(axis.get_scale(), str) and axis.get_scale() == 'log':
+            # Check if all values are non-positive
+            if axis == ax.yaxis and (all(y <= 0 for y in [p.get_ydata()[0] for p in ax.collections if hasattr(p, 'get_ydata') and len(p.get_ydata()) > 0])):
+                # Switch to linear scale
+                axis.set_scale('linear')
 
     plt.tight_layout()
 
@@ -1316,3 +1343,335 @@ def get_sae_bench_train_tokens_archived(sae_release: str, sae_id: str) -> int:
             return step * batch_size
         else:
             raise ValueError("No step match found")
+
+
+def plot_2var_graph_true_false(
+    results: dict[str, dict[str, float]],
+    custom_metric: str,
+    y_label: str = "Custom Metric",
+    title: str = "L0 vs Custom Metric",
+    xlims: tuple[float, float] | None = None,
+    ylims: tuple[float, float] | None = None,
+    output_filename: str | None = None,
+    baseline_value: float | None = None,
+    baseline_label: str | None = None,
+    x_axis_key: str = "l0",
+    trainer_markers: dict[str, str] | None = None,
+    trainer_colors: dict[str, str] | None = None,
+    return_fig: bool = False,
+    connect_points: bool = False,
+):
+    """Plot a 2-variable graph with points colored based on 'True' or 'False' in their filenames."""
+    if not trainer_markers:
+        trainer_markers = TRAINER_MARKERS
+
+    if not trainer_colors:
+        trainer_colors = TRAINER_COLORS
+
+    trainer_markers, trainer_colors = update_trainer_markers_and_colors(
+        results, trainer_markers, trainer_colors
+    )
+
+    # Create the scatter plot with extra width for legend
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    handles, labels = [], []
+
+    # Group results by True/False in filename
+    true_results = {k: v for k, v in results.items() if "True" in k}
+    false_results = {k: v for k, v in results.items() if "False" in k}
+    other_results = {k: v for k, v in results.items() if "True" not in k and "False" not in k}
+    
+    # Colors for True/False/Other
+    true_color = "green"
+    false_color = "red"
+    other_color = "blue"
+    
+    # Plot True results
+    if true_results:
+        true_l0_values = [data[x_axis_key] for data in true_results.values()]
+        true_metric_values = [data[custom_metric] for data in true_results.values()]
+        true_sae_classes = [data["sae_class"] for data in true_results.values()]
+        
+        for l0, metric, sae_class in zip(true_l0_values, true_metric_values, true_sae_classes):
+            marker = trainer_markers[sae_class]
+            ax.scatter(
+                l0,
+                metric,
+                marker=marker,
+                s=100,
+                color=true_color,
+                edgecolor="black",
+                zorder=2,
+            )
+        
+        # Add to legend
+        true_handle = plt.scatter(
+            [], [], marker="o", s=100, color=true_color, edgecolor="black"
+        )
+        handles.append(true_handle)
+        labels.append("True")
+    
+    # Plot False results
+    if false_results:
+        false_l0_values = [data[x_axis_key] for data in false_results.values()]
+        false_metric_values = [data[custom_metric] for data in false_results.values()]
+        false_sae_classes = [data["sae_class"] for data in false_results.values()]
+        
+        for l0, metric, sae_class in zip(false_l0_values, false_metric_values, false_sae_classes):
+            marker = trainer_markers[sae_class]
+            ax.scatter(
+                l0,
+                metric,
+                marker=marker,
+                s=100,
+                color=false_color,
+                edgecolor="black",
+                zorder=2,
+            )
+        
+        # Add to legend
+        false_handle = plt.scatter(
+            [], [], marker="o", s=100, color=false_color, edgecolor="black"
+        )
+        handles.append(false_handle)
+        labels.append("False")
+    
+    # Plot Other results (if any)
+    if other_results:
+        other_l0_values = [data[x_axis_key] for data in other_results.values()]
+        other_metric_values = [data[custom_metric] for data in other_results.values()]
+        other_sae_classes = [data["sae_class"] for data in other_results.values()]
+        
+        for l0, metric, sae_class in zip(other_l0_values, other_metric_values, other_sae_classes):
+            marker = trainer_markers[sae_class]
+            ax.scatter(
+                l0,
+                metric,
+                marker=marker,
+                s=100,
+                color=other_color,
+                edgecolor="black",
+                zorder=2,
+            )
+        
+        # Add to legend
+        other_handle = plt.scatter(
+            [], [], marker="o", s=100, color=other_color, edgecolor="black"
+        )
+        handles.append(other_handle)
+        labels.append("Other")
+
+    # Set labels and title
+    ax.set_xlabel("L0 (Sparsity)")
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+
+    # x log
+    print(custom_metric)
+    ax.set_xscale("log")
+
+    if baseline_value is not None:
+        ax.axhline(baseline_value, color="black", linestyle="--", label=baseline_label)
+        labels.append(baseline_label)
+        handles.append(
+            Line2D([0], [0], color="black", linestyle="--", label=baseline_label)
+        )
+
+    # Place legend outside the plot on the right
+    ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
+    # Set axis limits
+    if xlims:
+        ax.set_xlim(*xlims)
+    if ylims:
+        ax.set_ylim(*ylims)
+
+    # Add this before plt.tight_layout()
+    for axis in ax.yaxis, ax.xaxis:
+        if isinstance(axis.get_scale(), str) and axis.get_scale() == 'log':
+            # Check if all values are non-positive
+            if axis == ax.yaxis and (all(y <= 0 for y in [p.get_ydata()[0] for p in ax.collections if hasattr(p, 'get_ydata') and len(p.get_ydata()) > 0])):
+                # Switch to linear scale
+                axis.set_scale('linear')
+
+    plt.tight_layout()
+
+    # Save and show the plot
+    if output_filename:
+        plt.savefig(output_filename, bbox_inches="tight")
+
+    if return_fig:
+        return fig
+
+    plt.show()
+
+
+def plot_ravel_results(
+    eval_filenames: list[str],
+    core_filenames: list[str],
+    output_dir: str,
+    trainer_markers: dict[str, str] | None = None,
+    title_prefix: str = "",
+    return_fig: bool = False,
+    baseline_sae_path: str | None = None,
+    baseline_label: str | None = None,
+):
+    """
+    Plot RAVEL evaluation results, creating separate plots for disentanglement, 
+    cause, and isolation scores.
+    """
+    eval_results = get_eval_results(eval_filenames)
+    core_results = get_core_results(core_filenames)
+
+    # Filter out keys that don't exist in both dictionaries
+    common_keys = set(eval_results.keys()).intersection(set(core_results.keys()))
+    missing_keys = set(eval_results.keys()) - set(core_results.keys())
+    
+    if missing_keys:
+        print(f"Warning: Skipping {len(missing_keys)} files missing from core results")
+    
+    # Only keep keys that exist in both dictionaries
+    eval_results = {k: eval_results[k] for k in common_keys}
+    
+    for sae in eval_results:
+        eval_results[sae].update(core_results[sae])
+
+    # Handle baseline if provided
+    if baseline_sae_path:
+        baseline_results = get_eval_results([baseline_sae_path])
+        baseline_filename = os.path.basename(baseline_sae_path)
+        baseline_results_key = baseline_filename.replace("_eval_results.json", "")
+        core_baseline_filename = baseline_sae_path.replace("ravel", "core")
+        baseline_results[baseline_results_key].update(
+            get_core_results([core_baseline_filename])[baseline_results_key]
+        )
+        assert baseline_label, "Please provide a label for the baseline"
+    else:
+        baseline_value = None
+        assert baseline_label is None, "Please do not provide a label for the baseline"
+
+    # Create plots for each RAVEL metric
+    metrics = [
+        ("disentanglement_score", "RAVEL Disentanglement Score"),
+        ("cause_score", "RAVEL Cause Score"),
+        ("isolation_score", "RAVEL Isolation Score")
+    ]
+    
+    figures = []
+    
+    for metric_key, metric_name in metrics:
+        if baseline_sae_path:
+            baseline_value = baseline_results[baseline_results_key][metric_key]
+        else:
+            baseline_value = None
+            
+        title = f"{title_prefix}L0 vs {metric_name}"
+        output_filename = os.path.join(output_dir, f"ravel_{metric_key}_2var_sae_type.png")
+        
+        # Plot by SAE type
+        fig = plot_2var_graph(
+            eval_results,
+            metric_key,
+            y_label=metric_name,
+            title=title,
+            output_filename=output_filename,
+            trainer_markers=trainer_markers,
+            baseline_value=baseline_value,
+            baseline_label=baseline_label,
+            return_fig=True,
+        )
+        figures.append(fig)
+        
+        # Plot True/False comparison
+        tf_output_filename = os.path.join(output_dir, f"ravel_{metric_key}_2var_true_false.png")
+        plot_2var_graph_true_false(
+            eval_results,
+            metric_key,
+            y_label=metric_name,
+            title=f"{title_prefix}L0 vs {metric_name} (True/False)",
+            output_filename=tf_output_filename,
+            baseline_value=baseline_value,
+            baseline_label=baseline_label,
+            trainer_markers=trainer_markers,
+        )
+        
+        # Plot by dictionary size
+        dict_output_filename = os.path.join(output_dir, f"ravel_{metric_key}_2var_dict_size.png")
+        plot_2var_graph_dict_size(
+            eval_results,
+            metric_key,
+            y_label=metric_name,
+            title=title,
+            output_filename=dict_output_filename,
+            baseline_value=baseline_value,
+            baseline_label=baseline_label,
+        )
+    
+    if return_fig:
+        return figures
+
+
+def plot_all_ravel_metrics(
+    eval_filenames: list[str],
+    core_filenames: list[str],
+    output_dir: str,
+    trainer_markers: dict[str, str] | None = None,
+    title_prefix: str = "",
+    baseline_sae_path: str | None = None,
+    baseline_label: str | None = None,
+):
+    """
+    Plot all three RAVEL metrics in one function call.
+    Creates plots for disentanglement score, cause score, and isolation score.
+    
+    Args:
+        eval_filenames: List of RAVEL evaluation result files
+        core_filenames: List of corresponding core evaluation result files
+        output_dir: Directory to save output plots
+        trainer_markers: Optional dictionary mapping trainer types to marker shapes
+        title_prefix: Optional prefix for plot titles
+        baseline_sae_path: Optional path to baseline SAE evaluation results
+        baseline_label: Optional label for baseline in plots
+    
+    Returns:
+        None
+    """
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Plot disentanglement score
+    plot_results(
+        eval_filenames,
+        core_filenames,
+        "ravel",  # eval_type
+        os.path.join(output_dir, "ravel_disentanglement"),
+        trainer_markers=trainer_markers,
+        title_prefix=title_prefix + "Disentanglement: ",
+        baseline_sae_path=baseline_sae_path,
+        baseline_label=baseline_label,
+    )
+    
+    # Plot cause score
+    plot_results(
+        eval_filenames,
+        core_filenames,
+        "ravel_cause",  # eval_type with suffix to select cause_score
+        os.path.join(output_dir, "ravel_cause"),
+        trainer_markers=trainer_markers,
+        title_prefix=title_prefix + "Cause: ",
+        baseline_sae_path=baseline_sae_path,
+        baseline_label=baseline_label,
+    )
+    
+    # Plot isolation score
+    plot_results(
+        eval_filenames,
+        core_filenames,
+        "ravel_isolation",  # eval_type with suffix to select isolation_score
+        os.path.join(output_dir, "ravel_isolation"),
+        trainer_markers=trainer_markers,
+        title_prefix=title_prefix + "Isolation: ",
+        baseline_sae_path=baseline_sae_path,
+        baseline_label=baseline_label,
+    )
